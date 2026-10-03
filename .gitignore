@@ -5,3 +5,7 @@ dist/
 .DS_Store
 .env
 .env.local
+
+# Secrets — never commit these
+.jwt-secret-backup.txt
+*.secret
