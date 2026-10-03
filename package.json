@@ -1,0 +1,27 @@
+{
+  "name": "wh-ops-worker",
+  "version": "1.0.0",
+  "description": "Cloudflare Worker + D1 backend for WH-OPS (Panigrahana Weddings · Warehouse · Operations).",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:create": "wrangler d1 create wh-ops",
+    "db:schema": "wrangler d1 execute wh-ops --file=schema.sql --remote",
+    "db:seed": "wrangler d1 execute wh-ops --file=seed.sql --remote",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^3.90.0"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "csv-parse": "^5.5.6",
+    "csv-stringify": "^6.5.0",
+    "exceljs": "^4.4.0",
+    "hono": "^4.6.10",
+    "jsonwebtoken": "^9.0.2"
+  }
+}

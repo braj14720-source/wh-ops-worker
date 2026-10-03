@@ -1,0 +1,22 @@
+name = "wh-ops-api"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# D1 binding. Run `npm run db:create` once, paste the database_id here.
+[[d1_databases]]
+binding = "DB"
+database_name = "wh-ops"
+database_id = "26bca281-a7ca-47c6-9b55-383036232ad9"
+
+# Vars (non-secret). Secrets go to `wrangler secret put`.
+[vars]
+ALLOWED_LOGIN_EMAILS = "braj14720-source@users.noreply.github.com"
+ALLOWED_ORIGINS = "https://qp0hlmpdi65fd.space.minimax.io"
+DISABLE_PUBLIC_SIGNUP = "true"
+JWT_EXPIRES_IN = "30d"
+BOOTSTRAP_OWNER_NAME = "Appu Bharath"
+
+# Observability
+[observability]
+enabled = true
