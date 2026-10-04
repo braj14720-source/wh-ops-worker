@@ -22,6 +22,9 @@ CREATE TABLE IF NOT EXISTS inventory (
   supplier     TEXT,
   barcode      TEXT,
   notes        TEXT,
+  photo_url    TEXT,
+  qr_png       BLOB,                  -- Cached QR PNG (regenerated on PUT if NULL)
+  qr_payload   TEXT,                  -- The encoded payload (SKU or id:N), for cache invalidation
   created_at   TEXT DEFAULT (datetime('now')),
   updated_at   TEXT DEFAULT (datetime('now'))
 );
@@ -105,14 +108,15 @@ CREATE TABLE IF NOT EXISTS events (
 );
 
 CREATE TABLE IF NOT EXISTS event_materials (
-  id              INTEGER PRIMARY KEY AUTOINCREMENT,
-  event_id        INTEGER NOT NULL,
-  inventory_id    INTEGER NOT NULL,
-  quantity        REAL    NOT NULL DEFAULT 1,
-  status          TEXT    NOT NULL DEFAULT 'planning_pending',
-  notes           TEXT,
-  created_at      TEXT    DEFAULT (datetime('now')),
-  updated_at      TEXT    DEFAULT (datetime('now')),
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id          INTEGER NOT NULL,
+  inventory_id      INTEGER NOT NULL,
+  quantity          REAL    NOT NULL DEFAULT 1,   -- quantity reserved for this event (deducts from inventory)
+  returned_quantity  REAL    NOT NULL DEFAULT 0,   -- quantity that came back to warehouse
+  status            TEXT    NOT NULL DEFAULT 'planning_pending',
+  notes             TEXT,
+  created_at        TEXT    DEFAULT (datetime('now')),
+  updated_at        TEXT    DEFAULT (datetime('now')),
   UNIQUE(event_id, inventory_id),
   FOREIGN KEY (event_id)     REFERENCES events(id)     ON DELETE CASCADE,
   FOREIGN KEY (inventory_id) REFERENCES inventory(id) ON DELETE RESTRICT

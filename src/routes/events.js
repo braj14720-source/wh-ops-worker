@@ -126,6 +126,8 @@ function publicAllocation(r) {
 }
 
 function publicMaterial(r) {
+  const quantity = Number(r.quantity || 0);
+  const returned = Number(r.returned_quantity || 0);
   return {
     id: r.id,
     event_id: r.event_id,
@@ -134,13 +136,31 @@ function publicMaterial(r) {
     inventory_category: r.inventory_category || null,
     inventory_unit: r.inventory_unit || null,
     inventory_photo_url: r.inventory_photo_url || null,
-    quantity: r.quantity,
+    inventory_quantity: r.inventory_quantity != null ? Number(r.inventory_quantity) : null,
+    quantity,
+    returned_quantity: returned,
+    net_quantity: Math.max(0, quantity - returned), // consumed / still out at the event
     status: r.status,
     status_label: MATERIAL_STATUS_LABEL[r.status] || r.status,
     notes: r.notes,
     created_at: r.created_at,
     updated_at: r.updated_at,
   };
+}
+
+// ----- inventory deduction helpers ------------------------------------------
+
+// Apply a signed delta to inventory.quantity for a given inventory row.
+// Caller is expected to be inside a transaction.
+async function adjustInventory(inventoryId, delta) {
+  if (!delta || delta === 0) return;
+  await run(
+    `UPDATE inventory
+        SET quantity  = MAX(0, quantity + ?),
+            updated_at = datetime('now')
+      WHERE id = ?`,
+    [delta, inventoryId],
+  );
 }
 
 function calculate({ total_workers, supervisor_count, num_pm_teams }) {
@@ -472,7 +492,8 @@ events.get('/:id/materials', async (c) => {
             i.name      AS inventory_name,
             i.category  AS inventory_category,
             i.unit      AS inventory_unit,
-            i.photo_url AS inventory_photo_url
+            i.photo_url AS inventory_photo_url,
+            i.quantity  AS inventory_quantity
        FROM event_materials m
        LEFT JOIN inventory i ON i.id = m.inventory_id
       WHERE m.event_id = ?
@@ -495,25 +516,41 @@ events.post('/:id/materials', requireWrite(), async (c) => {
   const status = MATERIAL_STATUSES.has(body.status) ? body.status : 'planning_pending';
   const notes = body.notes ? String(body.notes).trim() : null;
 
-  const result = await run(
-    `INSERT INTO event_materials (event_id, inventory_id, quantity, status, notes)
-     VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT(event_id, inventory_id) DO UPDATE SET
-       quantity   = excluded.quantity,
-       status     = excluded.status,
-       notes      = excluded.notes,
-       updated_at = datetime('now')`,
-    [eventId, inventory_id, quantity, status, notes],
+  // Look up any existing row so we can compute the inventory delta.
+  const existing = await get(
+    'SELECT * FROM event_materials WHERE event_id = ? AND inventory_id = ?',
+    [eventId, inventory_id],
   );
+
+  await transaction(async () => {
+    // Net effect on inventory: subtract the new reserved amount, then add back
+    // any amount already reserved (the old row). The algebra is the same as
+    // for an update below.
+    const oldQ = existing ? Number(existing.quantity || 0) : 0;
+    const delta = -(quantity - oldQ); // negative = deduct from inventory
+    await adjustInventory(inventory_id, delta);
+
+    await run(
+      `INSERT INTO event_materials (event_id, inventory_id, quantity, status, notes)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(event_id, inventory_id) DO UPDATE SET
+         quantity   = excluded.quantity,
+         status     = excluded.status,
+         notes      = excluded.notes,
+         updated_at = datetime('now')`,
+      [eventId, inventory_id, quantity, status, notes],
+    );
+  });
+
   const rowOut = await get(
     `SELECT m.*, i.name AS inventory_name, i.category AS inventory_category, i.unit AS inventory_unit,
-            i.photo_url AS inventory_photo_url
+            i.photo_url AS inventory_photo_url, i.quantity AS inventory_quantity
        FROM event_materials m
        LEFT JOIN inventory i ON i.id = m.inventory_id
       WHERE m.event_id = ? AND m.inventory_id = ?`,
     [eventId, inventory_id],
   );
-  return c.json({ material: publicMaterial(rowOut), upserted_id: Number(result.lastInsertRowid) }, 201);
+  return c.json({ material: publicMaterial(rowOut) }, 201);
 });
 
 events.put('/:id/materials/:mid', requireWrite(), async (c) => {
@@ -525,24 +562,42 @@ events.put('/:id/materials/:mid', requireWrite(), async (c) => {
   );
   if (!existing) return c.json({ error: 'Material not found' }, 404);
   const body = await c.req.json().catch(() => ({}));
+  const oldQ = Number(existing.quantity || 0);
+  const oldR = Number(existing.returned_quantity || 0);
+
   const quantity = body.quantity != null
     ? Math.max(0, Number(body.quantity))
-    : existing.quantity;
+    : oldQ;
+  const returned_quantity = body.returned_quantity != null
+    ? Math.max(0, Math.min(Number(body.returned_quantity), quantity))
+    : oldR;
   const status = body.status
     ? (MATERIAL_STATUSES.has(body.status) ? body.status : existing.status)
     : existing.status;
   const notes = body.notes != null
     ? (body.notes ? String(body.notes).trim() : null)
     : existing.notes;
-  await run(
-    `UPDATE event_materials
-        SET quantity=?, status=?, notes=?, updated_at=datetime('now')
-      WHERE id=?`,
-    [quantity, status, notes, mid],
-  );
+
+  // Net inventory change:
+  //   • if quantity grew by Δq, deduct Δq
+  //   • if returned grew by Δr, add Δr (items came back to warehouse)
+  const qDelta = quantity - oldQ;          // + = user added more to BOM
+  const rDelta = returned_quantity - oldR; // + = user marked more as returned
+  const inventoryDelta = -qDelta + rDelta; // negative = deduct, positive = refund
+
+  await transaction(async () => {
+    await adjustInventory(existing.inventory_id, inventoryDelta);
+    await run(
+      `UPDATE event_materials
+          SET quantity=?, returned_quantity=?, status=?, notes=?, updated_at=datetime('now')
+        WHERE id=?`,
+      [quantity, returned_quantity, status, notes, mid],
+    );
+  });
+
   const rowOut = await get(
     `SELECT m.*, i.name AS inventory_name, i.category AS inventory_category, i.unit AS inventory_unit,
-            i.photo_url AS inventory_photo_url
+            i.photo_url AS inventory_photo_url, i.quantity AS inventory_quantity
        FROM event_materials m
        LEFT JOIN inventory i ON i.id = m.inventory_id
       WHERE m.id = ?`,
@@ -553,8 +608,19 @@ events.put('/:id/materials/:mid', requireWrite(), async (c) => {
 
 events.delete('/:id/materials', requireDelete(), async (c) => {
   const eventId = Number(c.req.param('id'));
-  await run('DELETE FROM event_materials WHERE event_id = ?', [eventId]);
-  return c.json({ ok: true });
+  // Refund every item's net consumption back to inventory before wiping.
+  const rows = await all(
+    'SELECT inventory_id, quantity, returned_quantity FROM event_materials WHERE event_id = ?',
+    [eventId],
+  );
+  await transaction(async () => {
+    for (const r of rows) {
+      const net = Math.max(0, Number(r.quantity || 0) - Number(r.returned_quantity || 0));
+      await adjustInventory(r.inventory_id, net);
+    }
+    await run('DELETE FROM event_materials WHERE event_id = ?', [eventId]);
+  });
+  return c.json({ ok: true, refunded: rows.length });
 });
 
 events.delete('/:id/materials/:mid', requireDelete(), async (c) => {
@@ -565,7 +631,12 @@ events.delete('/:id/materials/:mid', requireDelete(), async (c) => {
     [mid, eventId],
   );
   if (!existing) return c.json({ error: 'Material not found' }, 404);
-  await run('DELETE FROM event_materials WHERE id = ?', [mid]);
+  await transaction(async () => {
+    // Refund the net consumption (still at the event) back to inventory.
+    const net = Math.max(0, Number(existing.quantity || 0) - Number(existing.returned_quantity || 0));
+    await adjustInventory(existing.inventory_id, net);
+    await run('DELETE FROM event_materials WHERE id = ?', [mid]);
+  });
   return c.json({ ok: true });
 });
 

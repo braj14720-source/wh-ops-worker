@@ -16,11 +16,12 @@ function row(payload) {
     payload.supplier ? String(payload.supplier).trim() : null,
     payload.barcode ? String(payload.barcode).trim() : null,
     payload.notes ? String(payload.notes).trim() : null,
+    payload.photo_url ? String(payload.photo_url).trim() : null,
   ];
 }
 
-const COLS = '(name, category, unit, quantity, unit_price, supplier, barcode, notes)';
-const PLACEHOLDERS = '(?, ?, ?, ?, ?, ?, ?, ?)';
+const COLS = '(name, category, unit, quantity, unit_price, supplier, barcode, notes, photo_url)';
+const PLACEHOLDERS = '(?, ?, ?, ?, ?, ?, ?, ?, ?)';
 
 inventory.get('/', async (c) => {
   const items = await all('SELECT * FROM inventory ORDER BY datetime(updated_at) DESC, id DESC');
@@ -69,6 +70,7 @@ inventory.put('/:id', requireWrite(), async (c) => {
        name=?, category=?, unit=?,
        quantity=?, unit_price=?,
        supplier=?, barcode=?, notes=?,
+       photo_url=?,
        updated_at = datetime('now')
      WHERE id=?`,
     [...r, id],

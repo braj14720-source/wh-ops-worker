@@ -1,8 +1,8 @@
 // routes/import.js — bring inventory in from a Google Sheets URL (Hono router).
 import { Hono } from 'hono';
 import { parse } from 'csv-parse/sync';
-import { run, transaction } from '../lib/db.js';
-import { authRequired, requireWrite } from '../middleware/auth.js';
+import { run, transaction, batchMany } from '../lib/db.js';
+import { authRequired, requireWrite, requireSuperAdmin } from '../middleware/auth.js';
 
 const importRoute = new Hono();
 importRoute.use('*', authRequired());
@@ -33,10 +33,12 @@ const FIELD_ALIASES = {
   name:       ['name', 'item', 'item name', 'material', 'material name', 'product', 'description'],
   category:   ['category', 'cat', 'type', 'group'],
   unit:       ['unit', 'units', 'uom', 'measure'],
-  quantity:   ['quantity', 'qty', 'stock', 'count', 'balance'],
-  unit_price: ['unit_price', 'unit price', 'price', 'rate', 'cost', 'mrp'],
+  quantity:   ['quantity', 'qty', 'stock', 'count', 'balance', 'total quantity', 'total qty'],
+  unit_price: ['unit_price', 'unit price', 'price', 'rate', 'cost', 'mrp', 'unit cost', 'unit cost inr', 'cost inr'],
   supplier:   ['supplier', 'vendor', 'source'],
   notes:      ['notes', 'note', 'remarks', 'comment'],
+  sku:        ['sku', 'item code', 'material id', 'product code', 'barcode', 'item id'],
+  photo_url:  ['photo url', 'photo', 'image', 'image url', 'image link', 'google drive link', 'google drive image link', 'picture', 'picture url', 'photo link', 'drive link'],
 };
 
 function normalizeHeader(h) {
@@ -85,6 +87,8 @@ function parseRows(csvText) {
       unit_price: map.unit_price ? coerceNumber(row[map.unit_price]) : 0,
       supplier:   map.supplier ? (row[map.supplier] || null) : null,
       notes:      map.notes ? (row[map.notes] || null) : null,
+      barcode:    map.sku ? (row[map.sku] || null) : null,
+      photo_url:  map.photo_url ? (row[map.photo_url] || null) : null,
     }))
     .filter((it) => it.name && it.name.trim());
 
@@ -145,13 +149,87 @@ importRoute.post('/inventory/confirm', requireWrite(), async (c) => {
   await transaction(async () => {
     for (const r of items) {
       await run(
-        `INSERT INTO inventory (name, category, unit, quantity, unit_price, supplier, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [r.name, r.category, r.unit, r.quantity, r.unit_price, r.supplier, r.notes],
+        `INSERT INTO inventory (name, category, unit, quantity, unit_price, supplier, notes, barcode, photo_url)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [r.name, r.category, r.unit, r.quantity, r.unit_price, r.supplier, r.notes, r.barcode, r.photo_url],
       );
     }
   });
   return c.json({ inserted: items.length, total: items.length });
+});
+
+// Parse a Google Sheets spreadsheet ID out of any of:
+//   - https://docs.google.com/spreadsheets/d/SHEET_ID/edit
+//   - https://docs.google.com/spreadsheets/d/SHEET_ID/edit?usp=sharing
+//   - https://docs.google.com/spreadsheets/d/SHEET_ID (no key needed for public sheets)
+function extractSheetId(input) {
+  if (!input || typeof input !== 'string') return null;
+  const m = input.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  return m ? m[1] : null;
+}
+
+// Fetch a single tab from a Google Sheets spreadsheet by sheet name.
+// Uses the public gviz CSV endpoint — works for "Anyone with the link" sharing.
+async function fetchSheetTabCsv(sheetId, tabName) {
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?sheet=${encodeURIComponent(tabName)}&tqx=out:csv`;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 20000);
+  let res;
+  try {
+    res = await fetch(url, { redirect: 'follow', signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!res.ok) throw new Error(`Sheet fetch failed (${res.status})`);
+  const text = await res.text();
+  if (text.length > MAX_BYTES) throw new Error(`Sheet too large`);
+  return text;
+}
+
+// POST /api/import/sheets — body: { sheet_id | url, tabs?: ["Lights","platform"...], category_override? }
+// Imports every tab (or specified ones) and tags each item with the tab name as category.
+// Requires super_admin (write operation).
+importRoute.post('/sheets', requireSuperAdmin(), async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  let sheetId = body.sheet_id || extractSheetId(body.url);
+  if (!sheetId) return c.json({ error: 'sheet_id or url required' }, 400);
+
+  const tabs = Array.isArray(body.tabs) && body.tabs.length
+    ? body.tabs
+    : ['Lights', 'platform', 'Artificial Flowers', 'Name Boards', 'Furniture', 'structural', 'Misc', 'decor', 'SELECT - GOLFSHIRE'];
+
+  const summary = [];
+  let grandTotal = 0;
+
+  for (const tab of tabs) {
+    try {
+      const csv = await fetchSheetTabCsv(sheetId, tab);
+      const { items } = parseRows(csv);
+      // Tag every item with the tab name so we can distinguish from the master inventory
+      for (const it of items) {
+        if (!it.category) it.category = tab;
+        else if (it.category && tab) it.category = `${tab} / ${it.category}`;
+      }
+      await transaction(async () => {
+        // Build one D1 `INSERT` per item, run as a single batch — saves subrequests
+        // (decor has 886 rows). Chunk to 100/batch to avoid request body limits.
+        const stmts = items.map((r) => ({
+          sql: `INSERT INTO inventory (name, category, unit, quantity, unit_price, supplier, notes, barcode, photo_url)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          args: [r.name, r.category, r.unit, r.quantity, r.unit_price, r.supplier, r.notes, r.barcode, r.photo_url],
+        }));
+        const CHUNK = 100;
+        for (let i = 0; i < stmts.length; i += CHUNK) {
+          await batchMany(stmts.slice(i, i + CHUNK));
+        }
+      });
+      summary.push({ tab, inserted: items.length });
+      grandTotal += items.length;
+    } catch (e) {
+      summary.push({ tab, error: e.message });
+    }
+  }
+  return c.json({ sheet_id: sheetId, summary, total_inserted: grandTotal });
 });
 
 export default importRoute;

@@ -30,6 +30,7 @@ import importRoutes from './routes/import.js';
 import backupRoutes from './routes/backups.js';
 import settingsRoutes from './routes/settings.js';
 import pushRoutes from './routes/push.js';
+import qrRoutes from './routes/qr.js';
 
 const app = new Hono();
 
@@ -68,6 +69,7 @@ app.route('/api/import', importRoutes);
 app.route('/api/backups', backupRoutes);
 app.route('/api/settings', settingsRoutes);
 app.route('/api/push', pushRoutes);
+app.route('/api/qr', qrRoutes);
 
 app.notFound((c) => c.json({ error: 'Not found' }, 404));
 

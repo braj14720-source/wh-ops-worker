@@ -83,6 +83,15 @@ export async function transaction(fn) {
   return fn();
 }
 
+// batchMany — run an array of {sql, args} as a single D1 batch. Counts as 1 subrequest.
+// Returns number of rows affected across all statements.
+export async function batchMany(operations) {
+  if (!operations || !operations.length) return 0;
+  const prepared = operations.map((op) => bindAll(_db.prepare(op.sql), toArgs(op.args || [])));
+  const r = await _db.batch(prepared);
+  return Array.isArray(r) ? r.length : 1;
+}
+
 // ---- schema bootstrap (runs once per cold start; idempotent CREATE statements) ----
 
 const SCHEMA_SQL = `
