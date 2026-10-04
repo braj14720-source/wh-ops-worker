@@ -1,7 +1,7 @@
 // routes/vehicles.js — logistics / trip logs (Hono router).
 import { Hono } from 'hono';
 import { all, get, run } from '../lib/db.js';
-import { authRequired, requireWrite, requireDelete } from '../middleware/auth.js';
+import { authRequired, requireWrite, requireDelete, requireSuperAdmin } from '../middleware/auth.js';
 
 const vehicles = new Hono();
 vehicles.use('*', authRequired());
@@ -43,7 +43,7 @@ vehicles.post('/', requireWrite(), async (c) => {
   return c.json({ item }, 201);
 });
 
-vehicles.put('/:id', requireWrite(), async (c) => {
+vehicles.put('/:id', requireSuperAdmin(), async (c) => {
   const id = Number(c.req.param('id'));
   const existing = await get('SELECT * FROM vehicles WHERE id = ?', [id]);
   if (!existing) return c.json({ error: 'Not found' }, 404);
