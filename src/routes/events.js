@@ -510,8 +510,17 @@ events.post('/:id/materials', requireWrite(), async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const inventory_id = Number(body.inventory_id);
   if (!inventory_id) return c.json({ error: 'inventory_id is required' }, 400);
-  const inv = await get('SELECT id FROM inventory WHERE id = ?', [inventory_id]);
+  const inv = await get(
+    'SELECT id, merged_into FROM inventory WHERE id = ?',
+    [inventory_id],
+  );
   if (!inv) return c.json({ error: 'Unknown inventory_id' }, 400);
+  if (inv.merged_into) {
+    return c.json({
+      error: 'That item was merged into another row. Add the active row instead.',
+      merged_into: inv.merged_into,
+    }, 409);
+  }
   const quantity = Math.max(0, Number(body.quantity ?? 1));
   const status = MATERIAL_STATUSES.has(body.status) ? body.status : 'planning_pending';
   const notes = body.notes ? String(body.notes).trim() : null;

@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS inventory (
   photo_url    TEXT,
   qr_png       BLOB,                  -- Cached QR PNG (regenerated on PUT if NULL)
   qr_payload   TEXT,                  -- The encoded payload (SKU or id:N), for cache invalidation
+  merged_into  INTEGER REFERENCES inventory(id) ON DELETE SET NULL, -- soft-delete pointer
   created_at   TEXT DEFAULT (datetime('now')),
   updated_at   TEXT DEFAULT (datetime('now'))
 );
@@ -160,5 +161,6 @@ CREATE INDEX IF NOT EXISTS idx_event_alloc_event ON event_allocations(event_id);
 CREATE INDEX IF NOT EXISTS idx_event_alloc_pm    ON event_allocations(event_id, pm_team);
 CREATE INDEX IF NOT EXISTS idx_event_src_team    ON event_source_teams(event_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_barcode ON inventory(barcode);
+CREATE INDEX IF NOT EXISTS idx_inventory_merged  ON inventory(merged_into);
 CREATE INDEX IF NOT EXISTS idx_event_materials_event ON event_materials(event_id);
 CREATE INDEX IF NOT EXISTS idx_backups_created_at ON backups(created_at);
