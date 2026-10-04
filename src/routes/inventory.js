@@ -180,7 +180,7 @@ inventory.post('/:id/unmerge-all', requireSuperAdmin(), async (c) => {
   return c.json({ ok: true });
 });
 
-inventory.post('/', requireWrite(), async (c) => {
+inventory.post('/', requireSuperAdmin(), async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const r = row(body);
   if (!r[0]) return c.json({ error: 'name is required' }, 400);
@@ -199,7 +199,7 @@ inventory.post('/', requireWrite(), async (c) => {
   return c.json({ item }, 201);
 });
 
-inventory.put('/:id', requireWrite(), async (c) => {
+inventory.put('/:id', requireSuperAdmin(), async (c) => {
   const id = Number(c.req.param('id'));
   const existing = await get('SELECT * FROM inventory WHERE id = ?', [id]);
   if (!existing) return c.json({ error: 'Not found' }, 404);
