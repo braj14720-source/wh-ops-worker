@@ -102,6 +102,8 @@ async function nextRentalNo() {
 // ----- rental CRUD ----------------------------------------------------------
 
 rentals.get('/', async (c) => {
+  // Per-rental aggregates + a list of material names so the list screen
+  // can render "Materials: Name A (3), Name B (2)..." without N+1 calls.
   const rows = await all(
     `SELECT r.*,
             (SELECT COUNT(*) FROM rental_materials WHERE rental_id = r.id) AS material_count,
@@ -110,12 +112,43 @@ rentals.get('/', async (c) => {
        FROM rentals r
       ORDER BY r.start_date DESC, r.id DESC`,
   );
+  if (rows.length === 0) return c.json({ items: [] });
+
+  // Pull material names in one shot for every rental that's about to render.
+  const ids = rows.map((r) => r.id);
+  const placeholders = ids.map(() => '?').join(',');
+  const materials = await all(
+    `SELECT rm.rental_id, rm.quantity, i.name AS inventory_name
+       FROM rental_materials rm
+       LEFT JOIN inventory i ON i.id = rm.inventory_id
+      WHERE rm.rental_id IN (${placeholders})
+        AND i.name IS NOT NULL
+        AND i.merged_into IS NULL
+      ORDER BY rm.rental_id ASC, i.name ASC`,
+    ids,
+  );
+  // Group by rental_id.
+  const namesByRental = new Map();
+  for (const m of materials) {
+    if (!namesByRental.has(m.rental_id)) namesByRental.set(m.rental_id, []);
+    namesByRental.get(m.rental_id).push({
+      name: m.inventory_name,
+      quantity: Number(m.quantity || 0),
+    });
+  }
   return c.json({
-    items: rows.map((r) => ({
-      ...publicRental(r),
-      material_count: Number(r.material_count || 0),
-      qty_out: Number(r.qty_out || 0),
-    })),
+    items: rows.map((r) => {
+      const lines = namesByRental.get(r.id) || [];
+      return {
+        ...publicRental(r),
+        material_count: Number(r.material_count || 0),
+        qty_out: Number(r.qty_out || 0),
+        material_names: lines.map((l) => ({
+          name: l.name,
+          quantity: l.quantity,
+        })),
+      };
+    }),
   });
 });
 
