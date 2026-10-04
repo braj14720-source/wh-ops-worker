@@ -615,7 +615,7 @@ events.put('/:id/materials/:mid', requireWrite(), async (c) => {
   return c.json({ material: publicMaterial(rowOut) });
 });
 
-events.delete('/:id/materials', requireDelete(), async (c) => {
+events.delete('/:id/materials', requireWrite(), async (c) => {
   const eventId = Number(c.req.param('id'));
   // Refund every item's net consumption back to inventory before wiping.
   const rows = await all(
@@ -632,7 +632,7 @@ events.delete('/:id/materials', requireDelete(), async (c) => {
   return c.json({ ok: true, refunded: rows.length });
 });
 
-events.delete('/:id/materials/:mid', requireDelete(), async (c) => {
+events.delete('/:id/materials/:mid', requireWrite(), async (c) => {
   const eventId = Number(c.req.param('id'));
   const mid = Number(c.req.param('mid'));
   const existing = await get(

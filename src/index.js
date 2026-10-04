@@ -31,6 +31,7 @@ import backupRoutes from './routes/backups.js';
 import settingsRoutes from './routes/settings.js';
 import pushRoutes from './routes/push.js';
 import qrRoutes from './routes/qr.js';
+import rentalsRoutes from './routes/rentals.js';
 
 const app = new Hono();
 
@@ -70,6 +71,7 @@ app.route('/api/backups', backupRoutes);
 app.route('/api/settings', settingsRoutes);
 app.route('/api/push', pushRoutes);
 app.route('/api/qr', qrRoutes);
+app.route('/api/rentals', rentalsRoutes);
 
 app.notFound((c) => c.json({ error: 'Not found' }, 404));
 

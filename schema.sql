@@ -164,3 +164,41 @@ CREATE INDEX IF NOT EXISTS idx_inventory_barcode ON inventory(barcode);
 CREATE INDEX IF NOT EXISTS idx_inventory_merged  ON inventory(merged_into);
 CREATE INDEX IF NOT EXISTS idx_event_materials_event ON event_materials(event_id);
 CREATE INDEX IF NOT EXISTS idx_backups_created_at ON backups(created_at);
+
+-- PW-RENTAL: rental orders and per-rental material reservations.
+-- Reservations deduct from inventory; "Material Back" returns refund.
+CREATE TABLE IF NOT EXISTS rentals (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  rental_no          TEXT UNIQUE,
+  client_name        TEXT NOT NULL,
+  client_phone       TEXT,
+  event_name         TEXT,
+  delivery_address   TEXT,
+  start_date         TEXT,
+  end_date           TEXT,
+  status             TEXT NOT NULL DEFAULT 'open'
+                     CHECK (status IN ('open','dispatched','returned','closed','cancelled')),
+  notes              TEXT,
+  created_at         TEXT DEFAULT (datetime('now')),
+  updated_at         TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS rental_materials (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  rental_id          INTEGER NOT NULL,
+  inventory_id       INTEGER NOT NULL,
+  quantity           REAL    NOT NULL DEFAULT 1,
+  returned_quantity  REAL    NOT NULL DEFAULT 0,
+  status             TEXT    NOT NULL DEFAULT 'reserved'
+                     CHECK (status IN ('reserved','dispatched','returned','damaged')),
+  notes              TEXT,
+  created_at         TEXT DEFAULT (datetime('now')),
+  updated_at         TEXT DEFAULT (datetime('now')),
+  UNIQUE(rental_id, inventory_id),
+  FOREIGN KEY (rental_id)    REFERENCES rentals(id)    ON DELETE CASCADE,
+  FOREIGN KEY (inventory_id) REFERENCES inventory(id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS idx_rental_status     ON rentals(status);
+CREATE INDEX IF NOT EXISTS idx_rental_client     ON rentals(client_name);
+CREATE INDEX IF NOT EXISTS idx_rental_mat_rental ON rental_materials(rental_id);
