@@ -133,6 +133,7 @@ function publicMaterial(r) {
     inventory_name: r.inventory_name || null,
     inventory_category: r.inventory_category || null,
     inventory_unit: r.inventory_unit || null,
+    inventory_photo_url: r.inventory_photo_url || null,
     quantity: r.quantity,
     status: r.status,
     status_label: MATERIAL_STATUS_LABEL[r.status] || r.status,
@@ -468,9 +469,10 @@ events.get('/:id/materials', async (c) => {
   const eventId = Number(c.req.param('id'));
   const rows = await all(
     `SELECT m.*,
-            i.name     AS inventory_name,
-            i.category AS inventory_category,
-            i.unit     AS inventory_unit
+            i.name      AS inventory_name,
+            i.category  AS inventory_category,
+            i.unit      AS inventory_unit,
+            i.photo_url AS inventory_photo_url
        FROM event_materials m
        LEFT JOIN inventory i ON i.id = m.inventory_id
       WHERE m.event_id = ?
@@ -504,7 +506,8 @@ events.post('/:id/materials', requireWrite(), async (c) => {
     [eventId, inventory_id, quantity, status, notes],
   );
   const rowOut = await get(
-    `SELECT m.*, i.name AS inventory_name, i.category AS inventory_category, i.unit AS inventory_unit
+    `SELECT m.*, i.name AS inventory_name, i.category AS inventory_category, i.unit AS inventory_unit,
+            i.photo_url AS inventory_photo_url
        FROM event_materials m
        LEFT JOIN inventory i ON i.id = m.inventory_id
       WHERE m.event_id = ? AND m.inventory_id = ?`,
@@ -538,7 +541,8 @@ events.put('/:id/materials/:mid', requireWrite(), async (c) => {
     [quantity, status, notes, mid],
   );
   const rowOut = await get(
-    `SELECT m.*, i.name AS inventory_name, i.category AS inventory_category, i.unit AS inventory_unit
+    `SELECT m.*, i.name AS inventory_name, i.category AS inventory_category, i.unit AS inventory_unit,
+            i.photo_url AS inventory_photo_url
        FROM event_materials m
        LEFT JOIN inventory i ON i.id = m.inventory_id
       WHERE m.id = ?`,
