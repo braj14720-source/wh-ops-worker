@@ -11,7 +11,7 @@ database_id = "26bca281-a7ca-47c6-9b55-383036232ad9"
 
 # Vars (non-secret). Secrets go to `wrangler secret put`.
 [vars]
-ALLOWED_LOGIN_EMAILS = "braj14720-source@users.noreply.github.com"
+ALLOWED_LOGIN_EMAILS = "braj14720@gmail.com,braj14720-source@users.noreply.github.com"
 ALLOWED_ORIGINS = "https://qp0hlmpdi65fd.space.minimax.io"
 DISABLE_PUBLIC_SIGNUP = "true"
 JWT_EXPIRES_IN = "30d"
